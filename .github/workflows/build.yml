@@ -15,48 +15,55 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
-
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.7'
 
       - name: Sabse naya project zip chunein
+        shell: bash
         run: |
+          set +e
           best=""; bestv=0
           for z in *.zip; do
             [ -f "$z" ] || continue
-            v=$(unzip -p "$z" '*app/build.gradle' 2>/dev/null | grep -m1 versionCode | grep -o '[0-9]\+' || true)
-            v=${v:-0}
-            echo "$z  ->  versionCode $v"
-            if [ "$v" -gt "$bestv" ]; then bestv=$v; best="$z"; fi
+            v=$(unzip -p "$z" '*app/build.gradle' 2>/dev/null | grep -m1 'versionCode' | grep -o '[0-9]\+' | head -1)
+            [ -z "$v" ] && v=0
+            echo "$z  ->  versionCode $v" | tee -a "$GITHUB_WORKSPACE/build.log"
+            if [ "$v" -gt "$bestv" ] 2>/dev/null; then bestv=$v; best="$z"; fi
           done
-          if [ -z "$best" ]; then
-            if [ -f settings.gradle ]; then echo "PROJ=." >> $GITHUB_ENV; exit 0; fi
-            echo "Koi project zip nahi mila"; exit 1
-          fi
-          echo "==> Build ho raha hai: $best (versionCode $bestv)"
-          rm -rf _src && mkdir _src && unzip -q "$best" -d _src
-          proj=$(dirname "$(find _src -name settings.gradle | head -1)")
-          echo "PROJ=$proj" >> $GITHUB_ENV
+          if [ -z "$best" ]; then echo "Koi project zip nahi mila" | tee -a "$GITHUB_WORKSPACE/build.log"; exit 1; fi
+          echo "==> Build ho raha hai: $best (versionCode $bestv)" | tee -a "$GITHUB_WORKSPACE/build.log"
+          rm -rf _src && mkdir _src && unzip -o -q "$best" -d _src
+          sg=$(find _src -name settings.gradle | head -1)
+          if [ -z "$sg" ]; then echo "settings.gradle nahi mila" | tee -a "$GITHUB_WORKSPACE/build.log"; exit 1; fi
+          echo "PROJ=$(dirname "$sg")" >> "$GITHUB_ENV"
+          echo "PICKED=$best" >> "$GITHUB_ENV"
 
       - name: APK banayein
+        shell: bash
         run: |
           cd "$PROJ"
           set -o pipefail
-          gradle assembleDebug --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+          gradle assembleDebug --no-daemon 2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
 
-      - name: Error dikhao (Summary page par)
-        if: failure()
+      - name: Result dikhao (Summary page par)
+        if: always()
+        shell: bash
         run: |
           {
-            echo "## ❌ Build error — iska screenshot Claude ko bhejein"
+            echo "## Zip: ${PICKED:-koi nahi}"
             echo '```'
-            grep -E "error:|\.java:[0-9]+|AAPT|What went wrong|FAILED|e: " -A2 build.log | head -60
+            if [ -f build.log ]; then
+              grep -E "versionCode|==>|error:|\.java:[0-9]+|AAPT|What went wrong|FAILED|BUILD SUCCESSFUL|e: |nahi mila" -A2 build.log | head -80
+              echo "----- last lines -----"
+              tail -25 build.log
+            else
+              echo "build.log nahi bana - setup step me hi fail hua"
+            fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Baatora-Browser-APK
+          name: Baatora-v9-APK
           path: ${{ env.PROJ }}/app/build/outputs/apk/debug/*.apk
