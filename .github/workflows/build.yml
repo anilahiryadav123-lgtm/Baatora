@@ -10,26 +10,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Project zip kholna
-        run: |
-          if [ -f Baatora-Android-Project.zip ]; then unzip -o -q Baatora-Android-Project.zip; fi
-          ls -la
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      - uses: android-actions/setup-android@v3
+
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.9'
 
-      - name: APK banana
+      - name: Sabse naya project zip chunein
         run: |
-          cd Baatora
-          gradle assembleDebug --no-daemon
+          best=""; bestv=0
+          for z in *.zip; do
+            [ -f "$z" ] || continue
+            v=$(unzip -p "$z" '*app/build.gradle' 2>/dev/null | grep -m1 versionCode | grep -o '[0-9]\+' || true)
+            v=${v:-0}
+            echo "$z  ->  versionCode $v"
+            if [ "$v" -gt "$bestv" ]; then bestv=$v; best="$z"; fi
+          done
+          if [ -z "$best" ]; then
+            if [ -f settings.gradle ]; then echo "PROJ=." >> $GITHUB_ENV; exit 0; fi
+            echo "Koi project zip nahi mila"; exit 1
+          fi
+          echo "==> Build ho raha hai: $best (versionCode $bestv)"
+          rm -rf _src && mkdir _src && unzip -q "$best" -d _src
+          proj=$(dirname "$(find _src -name settings.gradle | head -1)")
+          echo "PROJ=$proj" >> $GITHUB_ENV
+
+      - name: APK banayein
+        run: |
+          cd "$PROJ"
+          set -o pipefail
+          gradle assembleDebug --no-daemon 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
+      - name: Error dikhao (Summary page par)
+        if: failure()
+        run: |
+          {
+            echo "## ❌ Build error — iska screenshot Claude ko bhejein"
+            echo '```'
+            grep -E "error:|\.java:[0-9]+|AAPT|What went wrong|FAILED|e: " -A2 build.log | head -60
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
           name: Baatora-Browser-APK
-          path: Baatora/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.PROJ }}/app/build/outputs/apk/debug/*.apk
+          
