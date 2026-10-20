@@ -60,4 +60,3 @@ jobs:
         with:
           name: Baatora-Browser-APK
           path: ${{ env.PROJ }}/app/build/outputs/apk/debug/*.apk
-          
